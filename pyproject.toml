@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "word-to-markdown"
+version = "1.0.0"
+description = "Convert Word documents (.docx/.doc) to Markdown"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "mammoth>=1.8.0",
+    "markdownify>=0.13.1",
+    "pypandoc>=1.13",
+]
+
+[project.scripts]
+word2md = "word_to_markdown.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["word_to_markdown*"]
