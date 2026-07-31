@@ -12,6 +12,8 @@ dependencies = [
     "mammoth>=1.8.0",
     "markdownify>=0.13.1",
     "pypandoc>=1.13",
+    "Pillow>=10.0.0",
+    "pytesseract>=0.3.10",
 ]
 
 [project.scripts]

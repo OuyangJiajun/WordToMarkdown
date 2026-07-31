@@ -6,6 +6,7 @@
 
 - 支持 `.docx` 和 `.doc` 格式
 - 自动提取文档中的图片到独立目录
+- 支持识别“代码图片”，并在 Markdown 中自动转换为代码块
 - 支持单文件或批量（目录递归）转换
 - 双引擎：优先使用 [Pandoc](https://pandoc.org/)（质量更高），回退到 [mammoth](https://github.com/mwilliamson/python-mammoth)（无需额外安装）
 
@@ -30,6 +31,23 @@ pip install -e .
 - Windows: https://pandoc.org/installing.html
 - macOS: `brew install pandoc`
 - Linux: `sudo apt install pandoc`
+
+### 3. （可选）安装 Tesseract OCR（用于代码图片识别）
+
+若希望文档中以图片形式嵌入的“代码片段”被自动识别并转换为 Markdown 代码块，需要安装 Tesseract OCR 引擎及其语言数据：
+
+- Windows: 下载 https://github.com/UB-Mannheim/tesseract/wiki 提供的安装包，安装时建议勾选 `eng`（英文）与 `chi_sim`（简体中文）语言包，并将安装目录（如 `C:\Program Files\Tesseract-OCR`）加入系统 `PATH` 或设置 `TESSDATA_PREFIX` 指向其 `tessdata` 目录
+- macOS: `brew install tesseract tesseract-lang`
+- Linux: `sudo apt install tesseract-ocr tesseract-ocr-chi-sim`
+
+验证安装：
+
+```bash
+tesseract --version
+python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
+```
+
+> 未安装 Tesseract 时，程序会自动退回为普通图片处理，不会报错，但“代码图片”不会被转换为代码块。
 
 ## 使用方法
 

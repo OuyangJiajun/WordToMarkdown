@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import html as html_module
 import re
 from pathlib import Path
+from typing import Any
 
 import mammoth
 from markdownify import markdownify as html_to_markdown
 
 SUPPORTED_EXTENSIONS = {".docx", ".doc"}
+_CODE_IMAGE_HINTS = (
+    "code",
+    "代码",
+    "程序",
+    "snippet",
+    "source",
+    "python",
+    "c++",
+    "java",
+    "javascript",
+    "sql",
+)
 
 
 class ConversionError(Exception):
@@ -122,6 +136,7 @@ def _convert_docx_with_mammoth(
         images_path.mkdir(parents=True, exist_ok=True)
 
     image_counter = 0
+    image_code_map: dict[str, str] = {}
 
     def convert_image(image) -> dict[str, str]:
         nonlocal image_counter
@@ -131,9 +146,16 @@ def _convert_docx_with_mammoth(
         image_counter += 1
         ext = _guess_image_extension(image.content_type)
         filename = f"image_{image_counter:03d}{ext}"
+        image_path = images_path / filename
         with image.open() as image_bytes:
-            (images_path / filename).write_bytes(image_bytes.read())
-        return {"src": f"{images_path.name}/{filename}"}
+            image_path.write_bytes(image_bytes.read())
+
+        src = f"{images_path.name}/{filename}"
+        code_text = _extract_code_from_image(image_path)
+        if code_text:
+            image_code_map[src] = code_text
+
+        return {"src": src}
 
     try:
         with source_path.open("rb") as docx_file:
@@ -148,13 +170,83 @@ def _convert_docx_with_mammoth(
         if message.type == "error":
             raise ConversionError(f"文档解析错误: {message.message}")
 
+    html = _replace_code_images(result.value, image_code_map)
     markdown = html_to_markdown(
-        result.value,
+        html,
         heading_style="ATX",
         bullets="-",
         strip=["script", "style"],
     )
     return _clean_markdown(markdown)
+
+
+def _replace_code_images(html: str, image_code_map: dict[str, str]) -> str:
+    if not image_code_map:
+        return html
+
+    def replace_match(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        src_match = re.search(r'src=["\']([^"\']+)["\']', tag, flags=re.IGNORECASE)
+        if not src_match:
+            return tag
+        src = html_module.unescape(src_match.group(1))
+        code_text = image_code_map.get(src)
+        if not code_text:
+            return tag
+        escaped = html_module.escape(code_text)
+        return f"<pre><code>{escaped}</code></pre>"
+
+    return re.sub(r"<img\b[^>]*>", replace_match, html, flags=re.IGNORECASE)
+
+
+def _extract_code_from_image(image_path: Path) -> str | None:
+    """Try to OCR an image and keep it when it looks like code.
+
+    The OCR path is optional: if `pytesseract` or `Pillow` is unavailable,
+    the image stays an image.
+    """
+    try:
+        from PIL import Image  # type: ignore
+        import pytesseract  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        text = pytesseract.image_to_string(Image.open(image_path), lang="eng+chi_sim")
+    except Exception:
+        return None
+
+    normalized = _clean_ocr_text(text)
+    if not normalized:
+        return None
+    if _looks_like_code(normalized):
+        return normalized
+    return None
+
+
+def _clean_ocr_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(line.rstrip() for line in text.splitlines())
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
+def _looks_like_code(text: str) -> bool:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+
+    code_tokens = sum(
+        1
+        for token in (";", "{", "}", "=", "(", ")", "[", "]", "<", ">", "::", "->", "#include")
+        if token in text
+    )
+    keyword_hits = sum(
+        1 for keyword in ("int ", "char ", "void ", "for ", "while ", "if ", "else", "return ") if keyword in text
+    )
+    indentation_hits = sum(1 for line in lines[1:] if line.startswith((" ", "\t")))
+
+    return code_tokens >= 3 or keyword_hits >= 2 or indentation_hits >= 2
 
 
 def _guess_image_extension(content_type: str) -> str:
