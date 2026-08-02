@@ -5,24 +5,11 @@ from __future__ import annotations
 import html as html_module
 import re
 from pathlib import Path
-from typing import Any
 
 import mammoth
 from markdownify import markdownify as html_to_markdown
 
 SUPPORTED_EXTENSIONS = {".docx", ".doc"}
-_CODE_IMAGE_HINTS = (
-    "code",
-    "代码",
-    "程序",
-    "snippet",
-    "source",
-    "python",
-    "c++",
-    "java",
-    "javascript",
-    "sql",
-)
 
 
 class ConversionError(Exception):
@@ -34,6 +21,7 @@ def convert_to_markdown(
     *,
     images_dir: Path | str | None = None,
     use_pandoc: bool = True,
+    reference_dir: Path | str | None = None,
 ) -> str:
     """Convert a Word document to Markdown text.
 
@@ -41,6 +29,7 @@ def convert_to_markdown(
         source: Path to .docx or .doc file.
         images_dir: Directory to save extracted images. If None, images are omitted.
         use_pandoc: Prefer pandoc when available (recommended for .doc files).
+        reference_dir: Directory containing the generated Markdown file.
 
     Returns:
         Markdown string.
@@ -56,7 +45,7 @@ def convert_to_markdown(
         )
 
     if use_pandoc and _pandoc_available():
-        return _convert_with_pandoc(source_path)
+        return _convert_with_pandoc(source_path, images_dir)
 
     if suffix == ".doc":
         raise ConversionError(
@@ -64,7 +53,7 @@ def convert_to_markdown(
             "请从 https://pandoc.org/installing.html 安装后重试。"
         )
 
-    return _convert_docx_with_mammoth(source_path, images_dir)
+    return _convert_docx_with_mammoth(source_path, images_dir, reference_dir)
 
 
 def convert_file(
@@ -93,14 +82,22 @@ def convert_file(
     else:
         images_dir = Path(images_dir).resolve()
 
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ConversionError(f"创建输出目录失败: {output_path.parent}: {exc}") from exc
+
     markdown = convert_to_markdown(
         source_path,
         images_dir=images_dir,
         use_pandoc=use_pandoc,
+        reference_dir=output_path.parent,
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(markdown, encoding="utf-8")
+    try:
+        output_path.write_text(markdown, encoding="utf-8")
+    except OSError as exc:
+        raise ConversionError(f"写入 Markdown 文件失败: {output_path}: {exc}") from exc
     return output_path
 
 
@@ -113,15 +110,27 @@ def _pandoc_available() -> bool:
         return False
 
 
-def _convert_with_pandoc(source_path: Path) -> str:
+def _convert_with_pandoc(
+    source_path: Path,
+    images_dir: Path | str | None,
+) -> str:
     import pypandoc
+
+    extra_args = ["--wrap=none", "--markdown-headings=atx"]
+    if images_dir is not None:
+        images_path = Path(images_dir).resolve()
+        try:
+            images_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ConversionError(f"创建图片目录失败: {images_path}: {exc}") from exc
+        extra_args.append(f"--extract-media={images_path}")
 
     try:
         return pypandoc.convert_file(
             str(source_path),
             "markdown",
             format="docx" if source_path.suffix.lower() == ".docx" else "doc",
-            extra_args=["--wrap=none", "--markdown-headings=atx"],
+            extra_args=extra_args,
         )
     except RuntimeError as exc:
         raise ConversionError(f"Pandoc 转换失败: {exc}") from exc
@@ -130,10 +139,15 @@ def _convert_with_pandoc(source_path: Path) -> str:
 def _convert_docx_with_mammoth(
     source_path: Path,
     images_dir: Path | str | None,
+    reference_dir: Path | str | None,
 ) -> str:
     images_path = Path(images_dir).resolve() if images_dir else None
+    reference_path = Path(reference_dir).resolve() if reference_dir else source_path.parent
     if images_path:
-        images_path.mkdir(parents=True, exist_ok=True)
+        try:
+            images_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ConversionError(f"创建图片目录失败: {images_path}: {exc}") from exc
 
     image_counter = 0
     image_code_map: dict[str, str] = {}
@@ -147,10 +161,16 @@ def _convert_docx_with_mammoth(
         ext = _guess_image_extension(image.content_type)
         filename = f"image_{image_counter:03d}{ext}"
         image_path = images_path / filename
-        with image.open() as image_bytes:
-            image_path.write_bytes(image_bytes.read())
+        try:
+            with image.open() as image_bytes:
+                image_path.write_bytes(image_bytes.read())
+        except OSError as exc:
+            raise ConversionError(f"保存图片失败: {image_path}: {exc}") from exc
 
-        src = f"{images_path.name}/{filename}"
+        try:
+            src = image_path.relative_to(reference_path).as_posix()
+        except ValueError:
+            src = image_path.as_uri()
         code_text = _extract_code_from_image(image_path)
         if code_text:
             image_code_map[src] = code_text

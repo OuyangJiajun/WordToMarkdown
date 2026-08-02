@@ -7,7 +7,7 @@ name = "word-to-markdown"
 version = "1.0.0"
 description = "Convert Word documents (.docx/.doc) to Markdown"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "mammoth>=1.8.0",
     "markdownify>=0.13.1",

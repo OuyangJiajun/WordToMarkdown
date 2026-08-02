@@ -43,20 +43,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def collect_word_files(paths: list[str]) -> list[Path]:
-    files: list[Path] = []
+    files: set[Path] = set()
     for raw in paths:
         path = Path(raw).resolve()
         if path.is_file():
             if path.suffix.lower() in SUPPORTED_EXTENSIONS:
-                files.append(path)
+                files.add(path)
             else:
                 print(f"跳过非 Word 文件: {path}", file=sys.stderr)
         elif path.is_dir():
-            for ext in SUPPORTED_EXTENSIONS:
-                files.extend(sorted(path.rglob(f"*{ext}")))
+            for candidate in path.rglob("*"):
+                if candidate.is_file() and candidate.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    files.add(candidate.resolve())
         else:
             print(f"路径不存在: {path}", file=sys.stderr)
-    return files
+    return sorted(files, key=lambda item: str(item).casefold())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,11 +78,14 @@ def main(argv: list[str] | None = None) -> int:
 
     for source in word_files:
         output = Path(args.output).resolve() if args.output else None
+        images_dir = args.images_dir
+        if images_dir and len(word_files) > 1:
+            images_dir = str(Path(images_dir).resolve() / f"{source.stem}_assets")
         try:
             result = convert_file(
                 source,
                 output=output,
-                images_dir=args.images_dir,
+                images_dir=images_dir,
                 use_pandoc=use_pandoc,
             )
             if not args.quiet:
